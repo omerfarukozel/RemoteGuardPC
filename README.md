@@ -149,8 +149,7 @@ Detaylı bilgi için [LICENSE](LICENSE) dosyasına bakınız.
 ## 👨‍💻 Geliştirici
 
 [Geliştirici Adı]
-- GitHub: [@kullaniciadi](https://github.com/kullaniciadi)
-- Telegram: [@kullaniciadi](https://t.me/kullaniciadi)
+- GitHub: [@omerfarukozel](https://github.com/omerfarukozel)
 
 ## 🤝 Katkıda Bulunma
 
