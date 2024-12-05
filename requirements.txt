@@ -11,3 +11,4 @@ comtypes>=1.2.0
 speedtest-cli>=2.1.3
 wmi>=1.5.1
 requests>=2.31.0
+soundfile>=0.12.1
