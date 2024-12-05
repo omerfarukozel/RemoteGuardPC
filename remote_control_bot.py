@@ -28,6 +28,7 @@ import pyautogui
 import cv2
 import numpy as np
 import sounddevice as sd
+import soundfile as sf
 from scipy.io.wavfile import write
 from ctypes import cast, POINTER
 from comtypes import CLSCTX_ALL
@@ -419,7 +420,7 @@ class RemoteControlBot:
     async def disconnect_internet(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """İnternet bağlantısnı kes"""
         os.system("ipconfig /release")
-        await update.message.reply_text("İnternet bağlantısı kesildi.")
+        await update.message.reply_text("��nternet bağlantısı kesildi.")
 
     @authorized_only
     async def kill_process(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -501,7 +502,7 @@ class RemoteControlBot:
 🔊 <b>Ses ve Görüntü:</b>
 /volume - Ses seviyesini ayarlar (0-100)
     Örnek: <code>/volume 50</code>
-/brightness - Ekran parlaklığını ayarlar (0-100)
+/brightness - Ekran parlaklğını ayarlar (0-100)
     Örnek: <code>/brightness 70</code>
 
 📊 <b>Sistem İzleme:</b>
@@ -842,7 +843,7 @@ CPU Frekansı: {:.1f} MHz
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 pass
         
-        # RAM kullanımına göre sırala
+        # RAM kullanımına g��re sırala
         apps.sort(key=lambda x: x['memory'], reverse=True)
         
         # En çok RAM kullanan 10 uygulamayı göster
@@ -1173,7 +1174,7 @@ CPU Frekansı: {:.1f} MHz
                 )
             return
 
-        # Kamera ve Kayıt menüsü
+        # Kamera ve Kayıt menüs
         elif query.data == Callbacks.MENU_CAMERA:
             await query.edit_message_text(
                 "📸 *Kamera ve Kayıt Menüsü*\n\n"
@@ -1184,6 +1185,32 @@ CPU Frekansı: {:.1f} MHz
                 reply_markup=create_camera_menu(),
                 parse_mode='Markdown'
             )
+
+        # Webcam fotoğraf çekme
+        elif query.data == Callbacks.CAM_PHOTO:
+            await query.edit_message_text("📸 Fotoğraf çekiliyor...")
+            if await self.take_webcam_photo():
+                try:
+                    await query.message.reply_photo(
+                        photo=open("webcam.jpg", "rb"),
+                        caption="📸 Webcam Fotoğrafı"
+                    )
+                    os.remove("webcam.jpg")
+                    await query.edit_message_text(
+                        "✅ Fotoğraf çekildi!",
+                        reply_markup=create_camera_menu()
+                    )
+                except Exception as e:
+                    await query.edit_message_text(
+                        f"❌ Fotoğraf gönderilirken hata oluştu: {str(e)}",
+                        reply_markup=create_camera_menu()
+                    )
+            else:
+                await query.edit_message_text(
+                    "❌ Fotoğraf çekilemedi! Kamera bağlantısını kontrol edin.",
+                    reply_markup=create_camera_menu()
+                )
+            return
 
         # Hareket algılama kontrolü
         elif query.data == Callbacks.CAM_MONITOR:
@@ -1196,22 +1223,21 @@ CPU Frekansı: {:.1f} MHz
                 return
             
             if not self.webcam_monitoring:
-                self.webcam_monitoring = True
-                # Hareket algılama başlat...
                 await query.edit_message_text(
-                    "👁️ Hareket algılama başlatıldı!\n"
-                    "Durdurmak için tekrar tıklayın.",
+                    "👁️ Hareket algılama başlatılıyor...",
                     reply_markup=InlineKeyboardMarkup([[
-                        InlineKeyboardButton("🛑 Hareket Algılamayı Durdur", callback_data=Callbacks.CAM_MONITOR_STOP),
-                        InlineKeyboardButton("◀️ Ana Menü", callback_data=Callbacks.MENU_MAIN)
+                        InlineKeyboardButton("🛑 Hareket Algılamayı Durdur", callback_data=Callbacks.CAM_MONITOR_STOP)
                     ]])
                 )
+                # Hareket algılamayı ayrı bir thread'de başlat
+                Thread(target=lambda: asyncio.run(self.start_webcam_monitor())).start()
             else:
                 self.webcam_monitoring = False
                 await query.edit_message_text(
                     "✅ Hareket algılama durduruldu!",
                     reply_markup=create_camera_menu()
                 )
+            return
 
         # Hareket algılamayı durdurma
         elif query.data == Callbacks.CAM_MONITOR_STOP:
@@ -1238,15 +1264,26 @@ CPU Frekansı: {:.1f} MHz
                 return
             
             if not self.recording_screen:
-                self.recording_screen = True
-                # Ekran kaydı başlat...
+                # Süre seçimi için butonlar
+                keyboard = [
+                    [
+                        InlineKeyboardButton("10 saniye", callback_data="screen_10"),
+                        InlineKeyboardButton("30 saniye", callback_data="screen_30")
+                    ],
+                    [
+                        InlineKeyboardButton("60 saniye", callback_data="screen_60"),
+                        InlineKeyboardButton("90 saniye", callback_data="screen_90")
+                    ],
+                    [
+                        InlineKeyboardButton("120 saniye", callback_data="screen_120")
+                    ],
+                    [InlineKeyboardButton("❌ İptal", callback_data=Callbacks.MENU_CAMERA)]
+                ]
+                
                 await query.edit_message_text(
-                    "🎥 Ekran kaydı başlatıldı!\n"
-                    "Durdurmak için tekrar tıklayın.",
-                    reply_markup=InlineKeyboardMarkup([[
-                        InlineKeyboardButton("🛑 Ekran Kaydını Durdur", callback_data=Callbacks.RECORD_SCREEN),
-                        InlineKeyboardButton("◀️ Ana Menü", callback_data=Callbacks.MENU_MAIN)
-                    ]])
+                    "🎥 Ekran kaydı süresi seçin:\n\n"
+                    "Not: Uzun kayıtlar daha büyük dosya boyutuna sahip olacaktır.",
+                    reply_markup=InlineKeyboardMarkup(keyboard)
                 )
             else:
                 self.recording_screen = False
@@ -1254,6 +1291,42 @@ CPU Frekansı: {:.1f} MHz
                     "✅ Ekran kaydı durduruldu!",
                     reply_markup=create_camera_menu()
                 )
+            return
+
+        # Ekran kaydı süresi seçimi
+        elif query.data.startswith("screen_"):
+            try:
+                duration = int(query.data.split("_")[1])
+                await query.edit_message_text(f"🎥 {duration} saniyelik ekran kaydı başlatılıyor...")
+                
+                self.recording_screen = True
+                if await self.record_screen(duration):
+                    # Video dosyasını gönder
+                    await query.message.reply_video(
+                        video=open("screen_recording.mp4", "rb"),
+                        caption=f"🎥 {duration} Saniyelik Ekran Kaydı",
+                        supports_streaming=True
+                    )
+                    # Dosyayı sil
+                    os.remove("screen_recording.mp4")
+                    await query.edit_message_text(
+                        "✅ Ekran kaydı tamamlandı!",
+                        reply_markup=create_camera_menu()
+                    )
+                else:
+                    await query.edit_message_text(
+                        "❌ Ekran kaydı başarısız!",
+                        reply_markup=create_camera_menu()
+                    )
+                self.recording_screen = False
+            except Exception as e:
+                print(f"Ekran kaydı işleme hatası: {str(e)}")
+                await query.edit_message_text(
+                    "❌ Ekran kaydı sırasında hata oluştu!",
+                    reply_markup=create_camera_menu()
+                )
+                self.recording_screen = False
+            return
 
         # Ses kaydı kontrolü
         elif query.data == Callbacks.RECORD_AUDIO:
@@ -1269,11 +1342,13 @@ CPU Frekansı: {:.1f} MHz
                 self.recording_audio = True
                 # Ses kaydı başlat...
                 await query.edit_message_text(
-                    "🎙️ Ses kaydı başlatıldı!\n"
-                    "Durdurmak için tekrar tıklayın.",
+                    "🎙️ Kaç saniyelik ses kaydı almak istiyorsunuz? (5-60 saniye)",
                     reply_markup=InlineKeyboardMarkup([[
-                        InlineKeyboardButton("🛑 Ses Kaydını Durdur", callback_data=Callbacks.RECORD_AUDIO),
-                        InlineKeyboardButton("◀️ Ana Menü", callback_data=Callbacks.MENU_MAIN)
+                        InlineKeyboardButton("10 saniye", callback_data="audio_10"),
+                        InlineKeyboardButton("30 saniye", callback_data="audio_30")
+                    ], [
+                        InlineKeyboardButton("60 saniye", callback_data="audio_60"),
+                        InlineKeyboardButton("İptal", callback_data=Callbacks.MENU_CAMERA)
                     ]])
                 )
             else:
@@ -1282,6 +1357,42 @@ CPU Frekansı: {:.1f} MHz
                     "✅ Ses kaydı durduruldu!",
                     reply_markup=create_camera_menu()
                 )
+            return
+
+        # Ses kaydı süresi seçimi
+        elif query.data.startswith("audio_"):
+            try:
+                duration = int(query.data.split("_")[1])
+                await query.edit_message_text(f"🎙️ {duration} saniyelik ses kaydı başlatılıyor...")
+                
+                self.recording_audio = True
+                if await self.record_audio(duration):
+                    # Ses dosyasını gönder
+                    await query.message.reply_audio(
+                        audio=open("recording.wav", "rb"),
+                        caption=f"🎙️ {duration} Saniyelik Ses Kaydı",
+                        duration=duration
+                    )
+                    # Dosyayı sil
+                    os.remove("recording.wav")
+                    await query.edit_message_text(
+                        "✅ Ses kaydı tamamlandı!",
+                        reply_markup=create_camera_menu()
+                    )
+                else:
+                    await query.edit_message_text(
+                        "❌ Ses kaydı başarısız!",
+                        reply_markup=create_camera_menu()
+                    )
+                self.recording_audio = False
+            except Exception as e:
+                print(f"Ses kaydı işleme hatası: {str(e)}")
+                await query.edit_message_text(
+                    "❌ Ses kaydı sırasında hata oluştu!",
+                    reply_markup=create_camera_menu()
+                )
+                self.recording_audio = False
+            return
 
     def run(self):
         """Botu başlat"""
@@ -1374,10 +1485,10 @@ CPU Frekansı: {:.1f} MHz
                     await update.message.reply_text(f"🎥 {duration} saniyelik ekran kaydı başlıyor...")
                     if await self.record_screen(duration):
                         await update.message.reply_video(
-                            video=open("screen_recording.avi", "rb"),
+                            video=open("screen_recording.mp4", "rb"),
                             caption=f"🎥 {duration} Saniyelik Ekran Kaydı"
                         )
-                        os.remove("screen_recording.avi")
+                        os.remove("screen_recording.mp4")
                         # Ana menüye dön
                         await update.message.reply_text(
                             "🤖 *Ana Menü*\nLütfen bir işlem seçin:",
@@ -1421,105 +1532,261 @@ CPU Frekansı: {:.1f} MHz
     async def record_audio(self, duration=5):
         """Ses kaydı al"""
         try:
-            import sounddevice as sd
-            import numpy as np
-            from scipy.io.wavfile import write
-            
+            print("Ses kaydı başlatılıyor...")
             fs = 44100  # Örnekleme hızı
-            recording = sd.rec(int(duration * fs), samplerate=fs, channels=2)
-            sd.wait()
+            channels = 2  # Stereo kayıt
+            
+            print(f"Kayıt parametreleri: {duration} saniye, {fs} Hz, {channels} kanal")
+            
+            # Ses kaydını başlat
+            print("Kayıt başlıyor...")
+            recording = sd.rec(int(duration * fs), samplerate=fs, channels=channels, dtype='float32')
+            sd.wait()  # Kayıt tamamlanana kadar bekle
+            print("Kayıt tamamlandı, dosya kaydediliyor...")
+            
+            # Ses dosyasını kaydet
             write('recording.wav', fs, recording)
+            print("Ses dosyası kaydedildi: recording.wav")
             return True
+            
         except Exception as e:
             print(f"Ses kaydı hatası: {str(e)}")
+            print("Hata detayı:", e.__class__.__name__)
+            import traceback
+            traceback.print_exc()
             return False
 
     async def record_screen(self, duration=10):
         """Ekran videosu kaydet"""
         try:
-            import cv2
-            import numpy as np
+            print(f"Ekran kaydı başlatılıyor... ({duration} saniye)")
             
-            filename = "screen_recording.avi"
-            screen_size = tuple(pyautogui.size())
-            fourcc = cv2.VideoWriter_fourcc(*'XVID')
-            out = cv2.VideoWriter(filename, fourcc, 20.0, screen_size)
+            # Ekran boyutlarını al
+            screen_width, screen_height = pyautogui.size()
+            output_filename = 'screen_recording.mp4'
+            fps = 10.0
             
+            print(f"Video ayarları: {screen_width}x{screen_height}, {fps} FPS")
+            
+            # Video yazıcıyı başlat
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            out = cv2.VideoWriter(
+                output_filename, 
+                fourcc, 
+                fps, 
+                (screen_width, screen_height)
+            )
+            
+            if not out.isOpened():
+                print("Video yazıcı açılamadı!")
+                return False
+            
+            print("Kayıt başlıyor...")
             start_time = time.time()
-            while (time.time() - start_time) < duration:
-                img = pyautogui.screenshot()
-                frame = np.array(img)
-                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                out.write(frame)
+            frame_count = 0
+            next_frame_time = start_time
+            frame_interval = 1.0 / fps
             
-            out.release()
-            return True
+            try:
+                while True:
+                    current_time = time.time()
+                    elapsed_time = current_time - start_time
+                    
+                    # Kayıt süresini kontrol et
+                    if elapsed_time >= duration:
+                        break
+                    
+                    # FPS kontrolü
+                    if current_time < next_frame_time:
+                        await asyncio.sleep(0.001)  # 1ms bekle
+                        continue
+                    
+                    # Ekran görüntüsü al
+                    screenshot = pyautogui.screenshot()
+                    frame = np.array(screenshot)
+                    frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                    
+                    # Kareyi kaydet
+                    out.write(frame)
+                    frame_count += 1
+                    
+                    # Sonraki kare zamanını ayarla
+                    next_frame_time = start_time + (frame_count + 1) * frame_interval
+                    
+                    # Her saniye ilerlemeyi göster
+                    if frame_count % int(fps) == 0:
+                        print(f"Kayıt: {elapsed_time:.1f}/{duration} saniye ({frame_count} kare)")
+                
+                actual_duration = time.time() - start_time
+                print(f"Kayıt tamamlandı: {frame_count} kare, {actual_duration:.1f} saniye")
+                return True
+                
+            finally:
+                out.release()
+                print("Video yazıcı kapatıldı")
+            
         except Exception as e:
             print(f"Ekran kaydı hatası: {str(e)}")
+            print("Hata detayı:", e.__class__.__name__)
+            import traceback
+            traceback.print_exc()
             return False
 
     async def take_webcam_photo(self):
         """Webcam'den fotoğraf çek"""
+        cap = None
         try:
-            cap = cv2.VideoCapture(0)
+            # Farklı kamera indekslerini dene
+            for camera_index in range(2):
+                try:
+                    cap = cv2.VideoCapture(camera_index, cv2.CAP_DSHOW)
+                    if cap.isOpened():
+                        print(f"Kamera {camera_index} açıldı")
+                        break
+                except:
+                    if cap:
+                        cap.release()
+                    continue
+            
+            if not cap or not cap.isOpened():
+                print("Hiçbir kamera bulunamadı!")
+                return False
+            
+            # Kamera ayarlarını yap
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            
+            # Kameranın hazırlanması için bekle
+            time.sleep(1)
+            
+            # Birkaç test karesi al
+            for _ in range(3):
+                ret = cap.grab()
+                if not ret:
+                    print("Kare yakalanamadı!")
+                    return False
+            
+            # Son kareyi oku
             ret, frame = cap.read()
+            if not ret or frame is None:
+                print("Kare okunamadı!")
+                return False
+            
+            # Fotoğrafı kaydet
             cv2.imwrite("webcam.jpg", frame)
-            cap.release()
             return True
+            
         except Exception as e:
             print(f"Webcam hatası: {str(e)}")
             return False
+        finally:
+            if cap:
+                cap.release()
 
     async def start_webcam_monitor(self):
         """Hareket algılamayı başlat"""
+        cap = None
         try:
-            import cv2
             self.webcam_monitoring = True
-            cap = cv2.VideoCapture(0)
+            
+            # Farklı kamera indekslerini dene
+            for camera_index in range(2):
+                try:
+                    cap = cv2.VideoCapture(camera_index, cv2.CAP_DSHOW)
+                    if cap.isOpened():
+                        print(f"Kamera {camera_index} açıldı")
+                        break
+                except:
+                    if cap:
+                        cap.release()
+                    continue
+            
+            if not cap or not cap.isOpened():
+                print("Hiçbir kamera bulunamadı!")
+                return False
+            
+            # Kamera ayarlarını yap
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            
+            # Kameranın hazırlanması için bekle
+            time.sleep(1)
             
             # İlk kareyi al
-            _, frame1 = cap.read()
-            _, frame2 = cap.read()
+            ret, frame1 = cap.read()
+            if not ret or frame1 is None:
+                print("İlk kare okunamadı!")
+                return False
+            
+            # Hareket algılama parametreleri
+            min_area = 3000  # Minimum hareket alanı
+            motion_detected = False
+            motion_count = 0
+            last_detection_time = time.time()
             
             while self.webcam_monitoring:
-                # Frameleri gri tonlamaya çevir
-                gray1 = cv2.cvtColor(frame1, cv2.COLOR_BGR2GRAY)
-                gray2 = cv2.cvtColor(frame2, cv2.COLOR_BGR2GRAY)
-                
-                # Framelerin farkını al
-                diff = cv2.absdiff(gray1, gray2)
-                
-                # Farkı threshold ile işle
-                _, thresh = cv2.threshold(diff, 20, 255, cv2.THRESH_BINARY)
-                
-                # Gürültüyü azalt
-                thresh = cv2.dilate(thresh, None, iterations=2)
-                
-                # Hareket olan bölgeleri bul
-                contours, _ = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-                
-                # Büyük hareketleri kontrol et
-                for contour in contours:
-                    if cv2.contourArea(contour) > 1500:  # Minimum hareket alanı
-                        # Hareket algılandı, fotoğraf çek ve gönder
-                        cv2.imwrite("motion.jpg", frame2)
-                        await self.send_motion_alert()
+                try:
+                    # İkinci kareyi al
+                    ret, frame2 = cap.read()
+                    if not ret or frame2 is None:
+                        print("Kare okunamadı!")
                         break
-                
-                # Frameleri güncelle
-                frame1 = frame2
-                _, frame2 = cap.read()
-                
-                # Kısa bir bekleme
-                await asyncio.sleep(0.1)
-            
-            # Kamerayı kapat
-            cap.release()
-            cv2.destroyAllWindows()
+                    
+                    # Frameleri gri tonlamaya çevir
+                    gray1 = cv2.cvtColor(frame1, cv2.COLOR_BGR2GRAY)
+                    gray2 = cv2.cvtColor(frame2, cv2.COLOR_BGR2GRAY)
+                    
+                    # Gürültü azaltma
+                    gray1 = cv2.GaussianBlur(gray1, (21, 21), 0)
+                    gray2 = cv2.GaussianBlur(gray2, (21, 21), 0)
+                    
+                    # Framelerin farkını al
+                    diff = cv2.absdiff(gray1, gray2)
+                    
+                    # Threshold uygula
+                    _, thresh = cv2.threshold(diff, 25, 255, cv2.THRESH_BINARY)
+                    
+                    # Gürültüyü azalt
+                    thresh = cv2.dilate(thresh, None, iterations=2)
+                    
+                    # Hareket olan bölgeleri bul
+                    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                    
+                    # Büyük hareketleri kontrol et
+                    current_motion = False
+                    for contour in contours:
+                        if cv2.contourArea(contour) > min_area:
+                            current_motion = True
+                            break
+                    
+                    current_time = time.time()
+                    if current_motion and (current_time - last_detection_time) > 5:
+                        motion_count += 1
+                        if motion_count >= 3:  # 3 ardışık hareket gerekli
+                            # Hareket algılandı, fotoğraf çek ve gönder
+                            cv2.imwrite("motion.jpg", frame2)
+                            await self.send_motion_alert()
+                            last_detection_time = current_time
+                            motion_count = 0
+                    else:
+                        motion_count = max(0, motion_count - 1)
+                    
+                    # Frameleri güncelle
+                    frame1 = frame2.copy()
+                    
+                    # Kısa bir bekleme
+                    await asyncio.sleep(0.1)
+                    
+                except Exception as e:
+                    print(f"Kare işleme hatası: {str(e)}")
+                    continue
             
         except Exception as e:
             print(f"Hareket algılama hatası: {str(e)}")
+        finally:
             self.webcam_monitoring = False
+            if cap:
+                cap.release()
 
     async def send_motion_alert(self):
         """Hareket algılandığında bildirim gönder"""
