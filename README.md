@@ -147,10 +147,7 @@ Tek şart, orijinal lisans ve telif hakkı bildiriminin korunmasıdır.
 Detaylı bilgi için [LICENSE](LICENSE) dosyasına bakınız.
 
 ## 👨‍💻 Geliştirici
-
-[Geliştirici Adı]
 - GitHub: [@omerfarukozel](https://github.com/omerfarukozel)
-
 ## 🤝 Katkıda Bulunma
 
 1. Bu repository'yi fork edin
